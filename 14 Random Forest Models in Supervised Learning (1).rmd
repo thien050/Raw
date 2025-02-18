@@ -1,0 +1,381 @@
+---
+title: "14 Random Forest Models in Supervised Learning"
+
+output: html_document
+---
+
+## Overview
+
+Random forests are a powerful and popular method in the domain of supervised learning. They constitute an ensemble learning technique, specifically an ensemble of decision trees, which means they combine the predictions of several base estimators in order to improve the generalizability and robustness of the prediction.
+
+The underlying idea of a random forest is simple: instead of relying on a single decision tree, we build multiple trees and let them 'vote' for the most popular class (in classification problems) or average their outputs (in regression problems). By doing so, random forests are able to capture complex patterns in data and are less prone to overfitting than individual decision trees.
+
+# Prepare the workspace
+
+```{r}
+options(
+  digits = 2,
+  scipen = 999,
+  warn = -1
+)
+rm(
+  list = ls()
+)
+library(magrittr)
+```
+
+### Why Random Forests?
+
+- **Accuracy**: Random forests often produce a highly accurate classifier.
+  
+- **Handling large data sets**: They can handle large datasets with higher dimensionality. They can handle thousands of input variables without variable deletion.
+  
+- **Balances Bias-Variance Trade-off**: They give estimates of what variables are important in the classification.
+  
+- **Versatile**: They can be used for both regression and classification tasks.
+
+## Background: Decision Trees
+
+Before diving deep into random forests, it's essential to understand decision trees since they are the foundational blocks of random forests.
+
+A decision tree splits the data into subsets using a series of decisions. Each decision is based on the value of one input variable. This results in a tree-like model of decisions. Unlike other tree boosting algorithms, each tree in a random forest can hold its own and be a predictive model by itself. For XGB, SGB or others where trees after tree number 1 depend on the previous trees to be used. This makes it harder for interpretation b/c you cant just onterpret 1 tree, you have to interpret all the trees prior.
+
+# Load regression data
+
+```{r}
+set.seed(
+  seed = 823
+)
+M_house_prices <- readr::read_csv(
+  file = "/Users/thienpham/Data Mining/data/prepared_house_prices.csv",
+  col_types = "cnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnccn",
+  name_repair = janitor::make_clean_names
+) %>% 
+  dplyr::filter(train_test == "Train") %>%
+  dplyr::mutate(
+    train_test = ifelse(runif(dplyr::n()) > 0.5,"Train","Test")
+  ) %>%
+  as.data.frame()
+v_house_prices <- c(
+  "bsmt_fin_sf1","bsmt_unf_sf","garage_area","gr_liv_area","lot_area","total_bsmt_sf","x1st_flr_sf","open_porch_sf","x2nd_flr_sf","year_remod_add","year_built","lot_frontage","exter_qual","tot_rms_abv_grd","mas_vnr_area","garage_cars","neighborhood","fireplace_qu","wood_deck_sf","central_air","garage_yr_blt","mo_sold","bsmt_full_bath","fireplaces","garage_type"
+)
+```
+
+## Random Forests: Under the Hood
+
+### Bootstrapping
+
+Random forests utilize the concept of bootstrapping. It's a resampling technique where we sample data with replacement. Obs not selected are called out of bag obs.  For each tree, a new bootstrap sample is drawn, and the tree is built on this sample.
+
+### Feature Randomness
+
+In traditional decision trees, at each split, the best split among all variables is chosen. However, in random forests, at each split, a random subset of features is chosen, and the best split among those features is determined. This introduces more diversity and reduces the correlation among trees.
+
+### Building a Random Forest
+
+1. Draw a bootstrap sample of size \( n \).
+2. Grow a decision tree from the bootstrap sample (typically 50 to 200). At each node:
+    - Select \( m \) variables randomly from all variables.
+    - Pick the best variable/split-point among the \( m \).
+    - Split the node into child nodes.
+3. Repeat the above two steps for \( ntree \) times to create \( ntree \) trees.
+4. Aggregate the predictions of \( ntree \) trees:
+    - Majority voting for classification.
+    - Average for regression.
+
+Packages: randomforest in caret is better for statistical purposes, ranger is faster, both do equally well at predictions
+```{r}
+ranger_default <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)]
+)
+ranger_default
+
+# Pulls out 1 tree randomly from the 500
+ranger::treeInfo(
+  object = ranger_default,
+  tree = 1
+)
+```
+
+mtry is the number of randomly selected features on each tree.
+target node size: minimum number of observations in each node
+Variable importance was not calculated here, we would need to specify in code above
+Splitrule: default = variance, trying to reduce variance
+OOB prediction error: Takes all of the obs not included in bootstrapped training data and calculates                         the accuracy on that. Kind of acts like a validation step. Statistics are in                           between training prediction error and validation prediction error. Great option                        when theres not enough data for train, validation, test split.
+
+
+GOLIDLOCKS: Random forrest: too deep, Decision trees: just right, SGB: not deep enough
+## Hyperparameters
+
+Hyperparameters control the behavior of the random forest. Here are a few crucial hyperparameters:
+
+- `num.trees`: Number of trees to grow. 
+- `mtry`: Number of variables randomly sampled as candidates at each split. 70% of sqrt(# of pred var)
+- `max.depth`: Maximum depth of any tree.
+- `min.node.size`: Minimum size of terminal nodes.
+
+```{r}
+# The caret package train function was used to determine good parameters (not shown)
+# mtry = 13, splitrule = variance and min.node.size = 5
+ranger_1 <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)],
+  num.trees = 250,
+  mtry = 13,
+  max.depth = 30,
+  min.node.size = 5,  
+  splitrule = "variance",
+  importance = "permutation",
+  oob.error = TRUE,
+  seed = 823,
+  keep.inbag = TRUE
+)
+ranger_1
+```
+
+## Advantages & Disadvantages
+
+**Advantages**:
+- Can handle large datasets.
+- Provides feature importance scores.
+- Less prone to overfitting.
+
+**Disadvantages**:
+- Black box model.
+- Computationally intensive.
+- Requires tuning for better performance.
+
+---
+
+## Bootstrap Samples & Random Subsets in Random Forests
+
+Two crucial components set random forests apart from traditional decision trees: 
+
+* bootstrapping observations and 
+* random subsets of predictor variables.
+
+### Bootstrapping Observations
+
+**Bootstrap sampling** involves drawing random samples from the dataset with replacement. Each tree in a random forest is grown on a different bootstrap sample from the original data.
+
+#### Why use Bootstrapping?
+
+1. **Diversity Among Trees**: By using different bootstrap samples, each tree in the forest gets exposed to a slightly different subset of the data. This ensures that not all trees see all the data points, leading to diversity among the trees. When multiple such trees 'vote' or average their predictions, this diversity helps in reducing overfitting and improving the overall generalization of the model.
+
+2. **Reduction in Variance**: One major problem with decision trees is that they can be very sensitive to small changes in the data, resulting in high variance. By averaging the results over multiple trees built on bootstrap samples, random forests effectively reduce this variance.
+
+3. **Out-of-Bag (OOB) Error Estimation**: About one-third of the data is left out during the bootstrapping process for each tree. This left-out data, referred to as out-of-bag (OOB) data, can be used to validate the performance of the tree. It gives a pretty good estimate of the test error without a separate validation set or cross-validation, making it a very efficient model evaluation tool.
+
+### Random Subset of Predictor Variables
+
+At each split in a decision tree within a random forest, only a random subset of predictor variables (features) is considered as candidates for splitting, as opposed to considering all features in traditional decision trees.
+
+#### Why use a Random Subset of Features?
+
+1. **Diversity Among Trees**: Just as bootstrapping introduces diversity in terms of data points, considering a random subset of features introduces diversity in terms of variables considered at each split. This ensures trees are not just diverse because of the data they've seen, but also based on the features they consider at each decision split.
+
+2. **Reduction of Overfitting**: Without this randomness of features, if there's one very strong predictor in the dataset, most of the trees in the forest will use this predictor at the top split. This makes all the trees look quite similar and highly correlated. By considering only a subset of predictors, we have a good chance that the strong predictor may not be considered in many trees, making them de-correlated and thereby reducing overfitting.
+
+3. **Improved Computational Efficiency**: By considering only a subset of features at each split, the algorithm can be significantly faster, especially when dealing with datasets with a large number of features.
+
+4. **Feature Importance**: With multiple trees considering different subsets of features, the model provides a clearer picture of which features are consistently useful for predictions across these diverse sets of conditions. This helps in deducing the relative importance of each feature.
+
+---
+
+## Ensemble Models: Making Predictions using Multiple Models
+
+Ensemble methods are techniques that combine multiple models to produce a single predictive model. The idea is to leverage the strengths of each individual model and, through various techniques, create a composite model that often performs better than any single model. The methods in which ensembles predict outcomes depend on the type of target variable: regression (continuous) or classification (categorical).
+
+### Regression Ensembles
+
+When dealing with a continuous target variable, ensemble models typically aggregate predictions from individual models to produce a final prediction.
+
+#### Methods of Aggregation:
+
+1. **Averaging**: The simplest way to combine predictions is by averaging them.
+   
+   \[
+   y_{pred} = \frac{1}{N} \sum_{i=1}^{N} y_{i}
+   \]
+
+   where \( y_{i} \) is the prediction from the \( i^{th} \) model and \( N \) is the number of models in the ensemble.
+
+2. **Weighted Averaging**: If some models are believed to be more accurate or relevant than others, predictions from these models can be given more weight.
+
+   \[
+   y_{pred} = \sum_{i=1}^{N} w_{i} y_{i}
+   \]
+
+   where \( w_{i} \) is the weight for the \( i^{th} \) model. The weights typically sum to 1.
+
+3. **Meta-models**: Sometimes, the predictions of individual models are used as input features to another model (called the meta-model), which learns how best to combine these predictions.
+
+### Classification Ensembles
+
+For categorical target variables, ensemble models often use a majority voting system or a probability-based approach.
+
+#### Methods of Combining Predictions:
+
+1. **Majority Voting**: Each model in the ensemble 'votes' for a class, and the class with the majority of votes is the final predicted class.
+
+   If there are three models and the predicted classes are ["A", "B", "A"], then the final prediction would be "A" since it received the majority of votes.
+
+2. **Weighted Voting**: Similar to weighted averaging in regression, if some models are considered more reliable, their votes can be given more weight.
+
+3. **Probability Averaging**: For models that output class probabilities (like logistic regression or neural networks), the probabilities for each class can be averaged across models, and the class with the highest average probability is chosen as the final prediction.
+
+   For instance, consider two models predicting for a binary classification problem. Model 1 outputs probabilities [0.6, 0.4] for classes A and B, respectively, while Model 2 outputs [0.5, 0.5]. Averaging probabilities, we get [0.55, 0.45], so Class A would be the final prediction.
+
+4. **Meta-models**: As with regression, a second-level model can be trained to take the predictions (or predicted probabilities) of the base models as inputs and make a final decision.
+
+### Why Ensembles Work?
+
+1. **Diversity**: Different models may capture different patterns/aspects in the data. By combining them, we can capture a wider array of patterns.
+
+2. **Reduced Overfitting**: Individual models, especially complex ones, can overfit to the noise in the training data. By aggregating predictions, this noise tends to cancel out, leading to more robust predictions.
+
+3. **Reduced Bias**: Some models might be biased in certain ways (e.g., underpredicting or overpredicting). Combining multiple models can reduce these biases.
+
+4. **Increased Accuracy**: In many cases, ensemble models have been shown to outperform individual models, making them particularly popular in machine learning competitions and real-world applications.
+
+---
+
+## Variable Importance in Random Forest Models
+
+Variable importance is a key strength of the random forest algorithm. By assessing the significance of each predictor in terms of its impact on the model's accuracy, random forests offer insights not just for prediction, but also for understanding the underlying structure and relationships within the data.
+
+```{r}
+ranger_none <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)],
+  importance = "none" # if we know we dont need variable importance, none will speed up computation time for prediction purposes
+)
+ranger_impurity <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)],
+  importance = "impurity"
+)
+ranger_impurity_corrected <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)],
+  importance = "impurity_corrected"
+)
+ranger_permutation <- ranger::ranger(
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)],
+  importance = "permutation" # shuffles a column and runs prediction to see how accuracy degrade after the shuffle
+)
+try({
+  ranger::importance( # trying to run variable importance without specifying will cause error
+    x = ranger_none
+  ) %>%
+    sort(decreasing = TRUE)
+})
+ranger::importance(
+  x = ranger_impurity
+) %>%
+  sort(decreasing = TRUE)
+ranger::importance(
+  x = ranger_impurity_corrected
+) %>%
+  sort(decreasing = TRUE)
+ranger::importance(
+  x = ranger_permutation
+) %>%
+  sort(decreasing = TRUE)
+```
+
+If we are to use variable importance as feature selection, we would aim to keep variables with at least > 1. We'd remove one, refit to see if any are < 1, keep doing it until we get a good bunch.
+
+For permutation, it would need to be rescaled before interpreting.
+
+### Why Variable Importance Matters:
+
+1. **Feature Selection**: In datasets with a large number of predictors, not all variables might be equally informative. By ranking variables based on their importance, one can focus on the most influential predictors, possibly reducing the dimensionality of the problem.
+
+2. **Interpretability**: Understanding which variables are most influential can provide insights into the underlying processes that generated the data. This is especially valuable in fields like biology or medicine, where interpreting the importance of different variables can lead to new hypotheses or discoveries.
+
+3. **Model Simplification**: By focusing on only the most important predictors, one can create simpler models that are faster to run and might generalize better to new data.
+
+### Methods of Measuring Variable Importance in the `ranger` Package:
+
+The `ranger` package in R is a fast implementation of random forests and provides different methods to assess variable importance. Two of these methods are based on the works of Janitza et al. (2016) and Altmann et al. (2010).
+
+1. **Janitza Method**:
+    - Specifically designed for high dimensional data.
+    - Computes variable importance without the need for permuting out-of-bag (OOB) data, making it much faster.
+    - It leverages the structure of the random forest, utilizing the fact that high-dimensional data will have many variables that are never selected for splitting. The importance of such non-informative variables can be computed directly without permutations.
+    - Especially valuable for datasets with a vast number of predictors where traditional permutation-based methods would be computationally prohibitive.
+
+2. **Altmann (Permutation) Method**:
+    - This method involves permuting the values of each predictor in the OOB samples and measuring the subsequent decrease in accuracy.
+    - The logic is straightforward: if a variable is important, randomly shuffling its values should drastically reduce the model's predictive accuracy.
+    - It is computationally intensive due to the permutation process, especially with large datasets.
+    - The advantage of the permutation approach is its generality; it can be used with all kinds of data and provides an intuitive measure of importance.
+
+```{r}
+ranger::importance_pvalues(
+  x = ranger_impurity,
+  method = "altmann",
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)]  
+) %>%
+  as.data.frame() %>%
+  dplyr::arrange(dplyr::desc(importance))
+ranger::importance_pvalues(
+  x = ranger_impurity_corrected,
+  method = "altmann",
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)]  
+) %>%
+  as.data.frame() %>%
+  dplyr::arrange(dplyr::desc(importance))
+ranger::importance_pvalues(
+  x = ranger_permutation,
+  method = "altmann",
+  formula = box_cox_sale_price ~.,
+  data = M_house_prices[,c("box_cox_sale_price",v_house_prices)]  
+) %>%
+  as.data.frame() %>%
+  dplyr::arrange(dplyr::desc(importance))
+```
+
+### Considerations:
+
+- **Correlated Predictors**: Important to remove correlated variables. In the presence of correlated predictors, random forests might give high importance to one variable and neglect the others, even if they are equally informative. This is a point to keep in mind when interpreting results. When you have correlated predictors, expect individual variable importance to be lower than it would be if the predictor was the only one in the model.
+
+## Predicting with ranger
+
+```{r}
+predict(
+  object = ranger_1,
+  data = M_house_prices,
+  type = "response" # gives the value of what we are actually trying to predict
+)$predictions
+
+
+predict(
+  # type = "se" requires keep.inbag = TRUE
+  object = ranger_1,
+  data = M_house_prices,
+  type = "se" # gives us the standard error from all 500 trees
+)$se
+
+
+predict(
+  object = ranger_1,
+  data = M_house_prices,
+  type = "terminalNodes" # provides terminal nodes for each tree
+)$predictions
+# type = "quantiles" requires quantile regression, quantreg=TRUE, keep.inbag = TRUE
+#predict(
+#  object = ranger_1,
+#  data = M_house_prices,
+#  type = "quantiles"
+#)
+```
+
+# Homework
+
+Train a random forest model using your prepared regression data, or prepared classification data. Submit an RMarkdown file or a Jupyter Notebook showing the accuracy of your predictions on your test set.
